@@ -1,10 +1,10 @@
 from fastapi import FastAPI, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
-from .database import SessionLocal, Base, engine
+from app.database import SessionLocal, Base, engine
 from . import crud, models
-from .schemas import TaskCreate, TaskResponse, TaskUpdate
+from app.schemas import TaskCreate, TaskResponse, TaskUpdate
 from typing import List
-from .enums import PriorityEnum
+from app.enums import PriorityEnum
 
 models.Base.metadata.create_all(bind=engine)
 

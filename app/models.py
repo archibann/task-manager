@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, Boolean, Date, Enum as SQLEnum
-from .database import Base
-from .enums import PriorityEnum
+from app.database import Base
+from app.enums import PriorityEnum
 
 class Task(Base):
     __tablename__ = "tasks"

@@ -1,7 +1,7 @@
 from pydantic import BaseModel
 from typing import Optional
 from datetime import date
-from .enums import PriorityEnum
+from app.enums import PriorityEnum
 
 class TaskCreate(BaseModel):
     title: str

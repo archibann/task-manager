@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from .models import Task
+from app.models import Task
 
 def get_tasks(completed: bool, priority: str, db: Session):
     query = db.query(Task)
