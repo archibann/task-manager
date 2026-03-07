@@ -9,3 +9,4 @@ class Task(Base):
     deadline = Column(Date, nullable=True)
     priority = Column(SQLEnum(PriorityEnum), nullable=True)
     completed = Column(Boolean, default=False)
+    description = Column(String)   # новое поле

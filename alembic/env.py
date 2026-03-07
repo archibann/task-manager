@@ -4,8 +4,9 @@ from alembic import context
 import os
 import sys
 
-sys.path.append(os.path.join(sys.path[0], 'app'))
+#sys.path.append(os.path.join(sys.path[0], 'app'))
 from app.models import Base  # твои модели SQLAlchemy
+from app import models
 
 config = context.config
 fileConfig(config.config_file_name)
