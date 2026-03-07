@@ -11,7 +11,9 @@ services:
       - postgres_data:/var/lib/postgresql/data
 
   app:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
     container_name: task_app
     restart: always
     depends_on:
