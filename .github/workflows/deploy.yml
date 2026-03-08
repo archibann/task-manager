@@ -22,5 +22,6 @@ jobs:
           key: ${{ secrets.VPS_KEY }}
           script: |
             cd /home/archiban/task-manager
-            docker compose -f docker-compose.prod.yml pull
+            git fetch origin
+            git reset --hard origin/main
             docker compose -f docker-compose.prod.yml up -d

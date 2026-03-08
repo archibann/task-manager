@@ -35,8 +35,10 @@ services:
       - "80:80"
       - "8443:443"
     volumes:
-      - ./nginx/conf.d:/etc/nginx/conf.d
-      - ./certs:/etc/ssl/certs
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - /etc/letsencrypt/live/static-node.zapto.org/fullchain.pem:/etc/ssl/certs/fullchain.pem:ro
+      - /etc/letsencrypt/live/static-node.zapto.org/privkey.pem:/etc/ssl/certs/privkey.pem:ro
+
       
 volumes:
   postgres_data:
