@@ -1,5 +1,12 @@
 const API = "http://127.0.0.1:8000"
 
+async function toggleComplete(id, completed) {
+    await fetch(API + "/tasks/" + id + "/complete", {
+        method: "PUT"
+    });
+    loadTasks();
+}
+
 async function loadTasks() {
     const res = await fetch(API + "/tasks")
     const tasks = await res.json()
@@ -11,8 +18,13 @@ async function loadTasks() {
         const li = document.createElement("li")
 
         li.innerHTML =
-            task.title +
-            " <button onclick='deleteTask(" + task.id + ")'>Delete</button>"
+            task.title + 
+            (task.deadline ? " (Deadline: " + task.deadline + ")" : "") +
+            (task.priority ? " [Priority: " + task.priority + "]" : "") +
+            " <button onclick='deleteTask(" + task.id + ")'>Delete</button>" +
+            " <button onclick='toggleComplete(" + task.id + ", " + task.completed + ")'>" +
+            (task.completed ? "Undo" : "Complete") + "</button>"+
+            " <button onclick='editTask(" + task.id + ")'>Edit</button>";
 
         list.appendChild(li)
     })
@@ -20,11 +32,17 @@ async function loadTasks() {
 
 async function addTask() {
     const input = document.getElementById("taskInput")
+    const deadline = document.getElementById("taskDeadline").value || null
+    const priority = document.getElementById("taskPriority").value || null
 
     await fetch(API + "/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: input.value })
+        body: JSON.stringify({
+             title: input.value,
+             deadline: deadline,
+             priority: priority
+        })
     })
 
     input.value = ""
@@ -39,4 +57,4 @@ async function deleteTask(id) {
     loadTasks()
 }
 
-loadTasks()
+loadTasks()         
