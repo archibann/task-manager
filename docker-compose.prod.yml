@@ -1,44 +1,78 @@
 services:
   db:
     image: postgres:16
-    container_name: task_db
     restart: always
     environment:
-      POSTGRES_USER: task_user
-      POSTGRES_PASSWORD: 1234
-      POSTGRES_DB: task_db
+      POSTGRES_USER: ${POSTGRES_USER:-task_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-1234}
+      POSTGRES_DB: ${POSTGRES_DB:-task_db}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-task_user} -d ${POSTGRES_DB:-task_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - app-network
 
   app:
     build:
       context: .
       dockerfile: Dockerfile.prod
-    container_name: task_app
     restart: always
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://task_user:1234@db:5432/task_db
-    ports: 
-      - "8000:8000"
-    volumes:
-      - .:/app
+      DATABASE_URL: postgresql://${POSTGRES_USER:-task_user}:${POSTGRES_PASSWORD:-1234}@db:5432/${POSTGRES_DB:-task_db}
+      BOT_TOKEN: ${BOT_TOKEN}
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - app-network
+
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-task_user}:${POSTGRES_PASSWORD:-1234}@db:5432/${POSTGRES_DB:-task_db}
+      BOT_TOKEN: ${BOT_TOKEN}
+    command: python -m app.bot
+    networks:
+      - app-network
 
   nginx:
-    image: nginx:latest
-    container_name: nginx
+    image: nginx:1.25-alpine
     restart: always
     depends_on:
-      - app
+      app:
+        condition: service_healthy
     ports:
       - "80:80"
       - "8443:443"
     volumes:
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
-      - /etc/letsencrypt/live/static-node.zapto.org/fullchain.pem:/etc/ssl/certs/fullchain.pem:ro
-      - /etc/letsencrypt/live/static-node.zapto.org/privkey.pem:/etc/ssl/certs/privkey.pem:ro
+      - ${SSL_CERT_PATH:-/etc/letsencrypt/live/static-node.zapto.org/fullchain.pem}:/etc/ssl/certs/fullchain.pem:ro
+      - ${SSL_KEY_PATH:-/etc/letsencrypt/live/static-node.zapto.org/privkey.pem}:/etc/ssl/certs/privkey.pem:ro
+    networks:
+      - app-network
 
-      
 volumes:
   postgres_data:
+
+networks:
+  app-network:
+    driver: bridge

@@ -9,6 +9,12 @@ services:
       POSTGRES_DB: task_db
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U task_user -d task_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   app:
     build:
@@ -17,7 +23,8 @@ services:
     container_name: task_app
     restart: always
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     environment:
       DATABASE_URL: postgresql://task_user:1234@db:5432/task_db
       BOT_TOKEN: ${BOT_TOKEN}
@@ -25,6 +32,12 @@ services:
       - "8000:8000"
     volumes:
       - .:/app
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   bot:
     build:
@@ -33,7 +46,8 @@ services:
     container_name: task_bot
     restart: always
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     environment:
       DATABASE_URL: postgresql://task_user:1234@db:5432/task_db
       BOT_TOKEN: ${BOT_TOKEN}
