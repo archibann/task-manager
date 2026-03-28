@@ -20,11 +20,16 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     # Добавляем поле created_at с текущим временем по умолчанию
-    op.add_column('tasks', 
-        sa.Column('created_at', 
-                  sa.DateTime(timezone=True), 
-                  server_default=sa.func.now(), 
-                  nullable=False))
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    columns = [col['name'] for col in inspector.get_columns('tasks')]
+    
+    if 'created_at' not in columns:
+        op.add_column('tasks', 
+            sa.Column('created_at', 
+                      sa.DateTime(timezone=True), 
+                      server_default=sa.func.now(), 
+                      nullable=False))
 
 
 def downgrade() -> None:

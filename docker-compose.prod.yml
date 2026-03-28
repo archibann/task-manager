@@ -62,11 +62,11 @@ services:
         condition: service_healthy
     ports:
       - "80:80"
-      - "8443:443"
+      #- "8443:443"
     volumes:
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
-      - ${SSL_CERT_PATH:-/etc/letsencrypt/live/static-node.zapto.org/fullchain.pem}:/etc/ssl/certs/fullchain.pem:ro
-      - ${SSL_KEY_PATH:-/etc/letsencrypt/live/static-node.zapto.org/privkey.pem}:/etc/ssl/certs/privkey.pem:ro
+      #- ${SSL_CERT_PATH:-/etc/letsencrypt/live/static-node.zapto.org/fullchain.pem}:/etc/ssl/certs/fullchain.pem:ro
+      #- ${SSL_KEY_PATH:-/etc/letsencrypt/live/static-node.zapto.org/privkey.pem}:/etc/ssl/certs/privkey.pem:ro
     networks:
       - app-network
 

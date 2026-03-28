@@ -20,9 +20,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Создание таблиц в БД
-models.Base.metadata.create_all(bind=engine)
-
 app = FastAPI(
     title="Task Manager API",
     description="API для управления задачами",
