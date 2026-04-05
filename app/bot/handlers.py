@@ -20,6 +20,7 @@ from app.bot.keyboards import (
     get_edit_keyboard,
 )
 from app.bot.states import AddTaskStates, EditTaskStates
+from app.bot.utils import run_sync
 
 router = Router()
 
@@ -70,8 +71,13 @@ async def cmd_help(message: Message):
 @router.message(Command("tasks"))
 async def cmd_tasks(message: Message):
     """Показать список всех задач"""
-    with get_db() as db:
-        tasks = crud.get_tasks(db, skip=0, limit=50)
+    try:
+        def get_tasks_sync():
+            with get_db() as db:
+                return crud.get_tasks(db, skip=0, limit=50)
+        
+        tasks = await run_sync(get_tasks_sync)
+        
         if not tasks:
             await message.answer(
                 "📋 Список задач пуст.\nНажмите ➕ чтобы добавить первую задачу!",
@@ -90,6 +96,8 @@ async def cmd_tasks(message: Message):
             text += f"{i}. {status} {priority_emoji} {task.title}\n"
         
         await message.answer(text, reply_markup=get_task_list_keyboard(tasks), parse_mode="HTML")
+    except asyncio.TimeoutError:
+        await message.answer("⏱ Превышено время ожидания. Попробуйте ещё раз.")
 
 
 @router.message(Command("add"))
@@ -119,24 +127,26 @@ async def callback_main_menu(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("tasks_"))
 async def callback_tasks_list(callback: CallbackQuery):
     """Показать список задач с фильтром"""
-    with get_db() as db:
+    try:
         filter_type = callback.data.split("_")[1]
         
-        if filter_type == "completed":
-            tasks = crud.get_tasks(db, completed=True, limit=50)
-            title = "✅ <b>Выполненные задачи:</b>"
-        elif filter_type == "pending":
-            tasks = crud.get_tasks(db, completed=False, limit=50)
-            title = "⏳ <b>Задачи в работе:</b>"
-        else:
-            tasks = crud.get_tasks(db, limit=50)
-            title = "📋 <b>Все задачи:</b>"
+        def get_filtered_tasks():
+            with get_db() as db:
+                if filter_type == "completed":
+                    return crud.get_tasks(db, completed=True, limit=50), "✅ <b>Выполненные задачи:</b>"
+                elif filter_type == "pending":
+                    return crud.get_tasks(db, completed=False, limit=50), "⏳ <b>Задачи в работе:</b>"
+                else:
+                    return crud.get_tasks(db, limit=50), "📋 <b>Все задачи:</b>"
+        
+        tasks, title = await run_sync(get_filtered_tasks)
         
         if not tasks:
             await callback.message.edit_text(
                 "📭 Задачи не найдены.",
                 reply_markup=get_main_keyboard()
             )
+            await callback.answer()
             return
         
         text = f"{title}\n\n"
@@ -154,15 +164,23 @@ async def callback_tasks_list(callback: CallbackQuery):
             reply_markup=get_task_list_keyboard(tasks),
             parse_mode="HTML"
         )
-    await callback.answer()
+        await callback.answer()
+    except asyncio.TimeoutError:
+        await callback.answer("⏱ Превышено время ожидания", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("task_"))
 async def callback_task_detail(callback: CallbackQuery):
     """Показать детали задачи"""
-    task_id = int(callback.data.split("_")[1])
-    with get_db() as db:
-        task = crud.get_task(db, task_id)
+    try:
+        task_id = int(callback.data.split("_")[1])
+        
+        def get_task_details():
+            with get_db() as db:
+                return crud.get_task(db, task_id)
+        
+        task = await run_sync(get_task_details)
+        
         if not task:
             await callback.answer("❌ Задача не найдена", show_alert=True)
             return
@@ -190,7 +208,9 @@ async def callback_task_detail(callback: CallbackQuery):
             reply_markup=get_task_detail_keyboard(task.id, task.completed),
             parse_mode="HTML"
         )
-    await callback.answer()
+        await callback.answer()
+    except asyncio.TimeoutError:
+        await callback.answer("⏱ Превышено время ожидания", show_alert=True)
 
 
 @router.callback_query(F.data == "add_task")
@@ -208,23 +228,33 @@ async def callback_add_task(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data.startswith("complete_"))
 async def callback_complete_task(callback: CallbackQuery):
     """Отметить задачу как выполненную/невыполненную"""
-    task_id = int(callback.data.split("_")[1])
-    with get_db() as db:
-        task = crud.get_task(db, task_id)
-        if not task:
+    try:
+        task_id = int(callback.data.split("_")[1])
+        
+        def toggle_complete():
+            with get_db() as db:
+                task = crud.get_task(db, task_id)
+                if not task:
+                    return None
+                
+                if task.completed:
+                    task.completed = False
+                    action = "возвращена в работу"
+                else:
+                    task.completed = True
+                    action = "отмечена как выполненная"
+                
+                db.commit()
+                db.refresh(task)
+                return task, action
+        
+        result = await run_sync(toggle_complete)
+        
+        if result is None:
             await callback.answer("❌ Задача не найдена", show_alert=True)
             return
         
-        if task.completed:
-            task.completed = False
-            action = "возвращена в работу"
-        else:
-            task.completed = True
-            action = "отмечена как выполненная"
-        
-        db.commit()
-        db.refresh(task)
-        
+        task, action = result
         await callback.answer(f"✅ Задача {action}!")
         
         status = "✅ Выполнена" if task.completed else "⏳ В работе"
@@ -250,14 +280,22 @@ async def callback_complete_task(callback: CallbackQuery):
             reply_markup=get_task_detail_keyboard(task.id, task.completed),
             parse_mode="HTML"
         )
+    except asyncio.TimeoutError:
+        await callback.answer("⏱ Превышено время ожидания", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("delete_"))
 async def callback_delete_task(callback: CallbackQuery):
     """Запрос на удаление задачи"""
-    task_id = int(callback.data.split("_")[1])
-    with get_db() as db:
-        task = crud.get_task(db, task_id)
+    try:
+        task_id = int(callback.data.split("_")[1])
+        
+        def get_task_for_delete():
+            with get_db() as db:
+                return crud.get_task(db, task_id)
+        
+        task = await run_sync(get_task_for_delete)
+        
         if not task:
             await callback.answer("❌ Задача не найдена", show_alert=True)
             return
@@ -269,15 +307,23 @@ async def callback_delete_task(callback: CallbackQuery):
             reply_markup=get_confirm_delete_keyboard(task_id),
             parse_mode="HTML"
         )
-    await callback.answer()
+        await callback.answer()
+    except asyncio.TimeoutError:
+        await callback.answer("⏱ Превышено время ожидания", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("confirm_delete_"))
 async def callback_confirm_delete(callback: CallbackQuery):
     """Подтверждение удаления задачи"""
-    task_id = int(callback.data.split("_")[2])
-    with get_db() as db:
-        task = crud.delete_task(db, task_id)
+    try:
+        task_id = int(callback.data.split("_")[2])
+        
+        def delete_task_sync():
+            with get_db() as db:
+                return crud.delete_task(db, task_id)
+        
+        task = await run_sync(delete_task_sync)
+        
         if task:
             await callback.message.edit_text(
                 f"✅ Задача <b>«{task.title}»</b> удалена!",
@@ -289,18 +335,26 @@ async def callback_confirm_delete(callback: CallbackQuery):
                 "❌ Задача не найдена",
                 reply_markup=get_main_keyboard()
             )
-    await callback.answer()
+        await callback.answer()
+    except asyncio.TimeoutError:
+        await callback.answer("⏱ Превышено время ожидания", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("edit_"))
 async def callback_edit_task(callback: CallbackQuery, state: FSMContext):
     """Редактирование задачи"""
-    data = callback.data.split("_")
-    
-    if len(data) == 2:
-        task_id = int(data[1])
-        with get_db() as db:
-            task = crud.get_task(db, task_id)
+    try:
+        data = callback.data.split("_")
+        
+        if len(data) == 2:
+            task_id = int(data[1])
+            
+            def get_task_for_edit():
+                with get_db() as db:
+                    return crud.get_task(db, task_id)
+            
+            task = await run_sync(get_task_for_edit)
+            
             if not task:
                 await callback.answer("❌ Задача не найдена", show_alert=True)
                 return
@@ -312,42 +366,44 @@ async def callback_edit_task(callback: CallbackQuery, state: FSMContext):
                 reply_markup=get_edit_keyboard(task_id),
                 parse_mode="HTML"
             )
-        await callback.answer()
-        return
-    
-    if len(data) == 3:
-        field = data[1]
-        task_id = int(data[2])
+            await callback.answer()
+            return
         
-        await state.update_data(edit_task_id=task_id)
-        
-        if field == "title":
-            await state.set_state(EditTaskStates.title)
-            await callback.message.edit_text(
-                "📝 Введите новое название задачи:",
-                parse_mode="HTML"
-            )
-        elif field == "description":
-            await state.set_state(EditTaskStates.description)
-            await callback.message.edit_text(
-                "📄 Введите новое описание задачи:",
-                parse_mode="HTML"
-            )
-        elif field == "deadline":
-            await state.set_state(EditTaskStates.deadline)
-            await callback.message.edit_text(
-                "📅 Введите новую дату дедлайна (ДД.ММ.ГГГГ):",
-                parse_mode="HTML"
-            )
-        elif field == "priority":
-            await state.set_state(EditTaskStates.priority)
-            await callback.message.edit_text(
-                "🎯 Выберите новый приоритет:",
-                reply_markup=get_priority_keyboard(),
-                parse_mode="HTML"
-            )
-        
-        await callback.answer()
+        if len(data) == 3:
+            field = data[1]
+            task_id = int(data[2])
+            
+            await state.update_data(edit_task_id=task_id)
+            
+            if field == "title":
+                await state.set_state(EditTaskStates.title)
+                await callback.message.edit_text(
+                    "📝 Введите новое название задачи:",
+                    parse_mode="HTML"
+                )
+            elif field == "description":
+                await state.set_state(EditTaskStates.description)
+                await callback.message.edit_text(
+                    "📄 Введите новое описание задачи:",
+                    parse_mode="HTML"
+                )
+            elif field == "deadline":
+                await state.set_state(EditTaskStates.deadline)
+                await callback.message.edit_text(
+                    "📅 Введите новую дату дедлайна (ДД.ММ.ГГГГ):",
+                    parse_mode="HTML"
+                )
+            elif field == "priority":
+                await state.set_state(EditTaskStates.priority)
+                await callback.message.edit_text(
+                    "🎯 Выберите новый приоритет:",
+                    reply_markup=get_priority_keyboard(),
+                    parse_mode="HTML"
+                )
+            
+            await callback.answer()
+    except asyncio.TimeoutError:
+        await callback.answer("⏱ Превышено время ожидания", show_alert=True)
 
 
 # ==================== FSM - СОЗДАНИЕ ЗАДАЧИ ====================
@@ -397,22 +453,26 @@ async def process_add_deadline(message: Message, state: FSMContext):
 @router.callback_query(AddTaskStates.priority, F.data.startswith("priority_"))
 async def process_add_priority(callback: CallbackQuery, state: FSMContext):
     """Обработка приоритета и создание задачи"""
-    priority_value = callback.data.split("_")[1]
-    priority = None if priority_value == "none" else PriorityEnum(priority_value)
-    
-    data = await state.get_data()
-    title = data.get("title")
-    description = data.get("description")
-    deadline = data.get("deadline")
-    
-    with get_db() as db:
-        task = crud.create_task(
-            db,
-            title=title,
-            description=description,
-            deadline=deadline,
-            priority=priority
-        )
+    try:
+        priority_value = callback.data.split("_")[1]
+        priority = None if priority_value == "none" else PriorityEnum(priority_value)
+        
+        data = await state.get_data()
+        title = data.get("title")
+        description = data.get("description")
+        deadline = data.get("deadline")
+        
+        def create_task_sync():
+            with get_db() as db:
+                return crud.create_task(
+                    db,
+                    title=title,
+                    description=description,
+                    deadline=deadline,
+                    priority=priority
+                )
+        
+        task = await run_sync(create_task_sync)
         
         await callback.message.edit_text(
             f"✅ <b>Задача создана!</b>\n\n"
@@ -423,9 +483,11 @@ async def process_add_priority(callback: CallbackQuery, state: FSMContext):
             reply_markup=get_main_keyboard(),
             parse_mode="HTML"
         )
-    
-    await state.clear()
-    await callback.answer()
+        
+        await state.clear()
+        await callback.answer()
+    except asyncio.TimeoutError:
+        await callback.answer("⏱ Превышено время ожидания", show_alert=True)
 
 
 # ==================== FSM - РЕДАКТИРОВАНИЕ ЗАДАЧИ ====================
@@ -433,78 +495,97 @@ async def process_add_priority(callback: CallbackQuery, state: FSMContext):
 @router.message(EditTaskStates.title)
 async def process_edit_title(message: Message, state: FSMContext):
     """Обработка нового названия"""
-    data = await state.get_data()
-    task_id = data.get("edit_task_id")
-    
-    with get_db() as db:
-        crud.update_task(db, task_id, title=message.text)
-        task = crud.get_task(db, task_id)
+    try:
+        data = await state.get_data()
+        task_id = data.get("edit_task_id")
+        
+        def update_title():
+            with get_db() as db:
+                crud.update_task(db, task_id, title=message.text)
+                return crud.get_task(db, task_id)
+        
+        task = await run_sync(update_title)
         
         await message.answer(
             f"✅ Название обновлено!\n\n📌 <b>{task.title}</b>",
             reply_markup=get_edit_keyboard(task_id),
             parse_mode="HTML"
         )
-    
-    await state.clear()
+        await state.clear()
+    except asyncio.TimeoutError:
+        await message.answer("⏱ Превышено время ожидания. Попробуйте ещё раз.")
 
 
 @router.message(EditTaskStates.description)
 async def process_edit_description(message: Message, state: FSMContext):
     """Обработка нового описания"""
-    data = await state.get_data()
-    task_id = data.get("edit_task_id")
-    
-    with get_db() as db:
-        crud.update_task(db, task_id, description=message.text)
-        task = crud.get_task(db, task_id)
+    try:
+        data = await state.get_data()
+        task_id = data.get("edit_task_id")
+        
+        def update_description():
+            with get_db() as db:
+                crud.update_task(db, task_id, description=message.text)
+                return crud.get_task(db, task_id)
+        
+        task = await run_sync(update_description)
         
         await message.answer(
             f"✅ Описание обновлено!\n\n📄 {task.description or 'Нет описания'}",
             reply_markup=get_edit_keyboard(task_id),
             parse_mode="HTML"
         )
-    
-    await state.clear()
+        await state.clear()
+    except asyncio.TimeoutError:
+        await message.answer("⏱ Превышено время ожидания. Попробуйте ещё раз.")
 
 
 @router.message(EditTaskStates.deadline)
 async def process_edit_deadline(message: Message, state: FSMContext):
     """Обработка нового дедлайна"""
-    data = await state.get_data()
-    task_id = data.get("edit_task_id")
-    
     try:
-        deadline = datetime.strptime(message.text, "%d.%m.%Y").date()
-    except ValueError:
-        await message.answer("❌ Неверный формат даты. Введите ДД.ММ.ГГГГ:")
-        return
-    
-    with get_db() as db:
-        crud.update_task(db, task_id, deadline=deadline)
-        task = crud.get_task(db, task_id)
+        data = await state.get_data()
+        task_id = data.get("edit_task_id")
+        
+        try:
+            deadline = datetime.strptime(message.text, "%d.%m.%Y").date()
+        except ValueError:
+            await message.answer("❌ Неверный формат даты. Введите ДД.ММ.ГГГГ:")
+            return
+        
+        def update_deadline():
+            with get_db() as db:
+                crud.update_task(db, task_id, deadline=deadline)
+                return crud.get_task(db, task_id)
+        
+        task = await run_sync(update_deadline)
         
         await message.answer(
             f"✅ Дедлайн обновлен!\n\n📅 {task.deadline.strftime('%d.%m.%Y')}",
             reply_markup=get_edit_keyboard(task_id),
             parse_mode="HTML"
         )
-    
-    await state.clear()
+        await state.clear()
+    except asyncio.TimeoutError:
+        await message.answer("⏱ Превышено время ожидания. Попробуйте ещё раз.")
 
 
 @router.callback_query(EditTaskStates.priority, F.data.startswith("priority_"))
 async def process_edit_priority(callback: CallbackQuery, state: FSMContext):
     """Обработка нового приоритета"""
-    priority_value = callback.data.split("_")[1]
-    priority = None if priority_value == "none" else PriorityEnum(priority_value)
-    
-    data = await state.get_data()
-    task_id = data.get("edit_task_id")
-    
-    with get_db() as db:
-        crud.update_task(db, task_id, priority=priority)
-        task = crud.get_task(db, task_id)
+    try:
+        priority_value = callback.data.split("_")[1]
+        priority = None if priority_value == "none" else PriorityEnum(priority_value)
+        
+        data = await state.get_data()
+        task_id = data.get("edit_task_id")
+        
+        def update_priority():
+            with get_db() as db:
+                crud.update_task(db, task_id, priority=priority)
+                return crud.get_task(db, task_id)
+        
+        task = await run_sync(update_priority)
         
         priority_text = {
             PriorityEnum.high: "🔴 Высокий",
@@ -517,9 +598,11 @@ async def process_edit_priority(callback: CallbackQuery, state: FSMContext):
             reply_markup=get_edit_keyboard(task_id),
             parse_mode="HTML"
         )
-    
-    await state.clear()
-    await callback.answer()
+        
+        await state.clear()
+        await callback.answer()
+    except asyncio.TimeoutError:
+        await callback.answer("⏱ Превышено время ожидания", show_alert=True)
 
 
 # ==================== FALLBACK ====================
